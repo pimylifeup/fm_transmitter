@@ -63,7 +63,8 @@
 #define PWM_CHANNEL_RANGE 32
 #define PAGE_SIZE 4096
 
-struct TimerRegisters {
+struct TimerRegisters
+{
     uint32_t ctlStatus;
     uint32_t low;
     uint32_t high;
@@ -73,12 +74,14 @@ struct TimerRegisters {
     uint32_t c3;
 };
 
-struct ClockRegisters {
+struct ClockRegisters
+{
     uint32_t ctl;
     uint32_t div;
 };
 
-struct PWMRegisters {
+struct PWMRegisters
+{
     uint32_t ctl;
     uint32_t status;
     uint32_t dmaConf;
@@ -91,7 +94,8 @@ struct PWMRegisters {
     uint32_t chn2Data;
 };
 
-struct DMAControllBlock {
+struct DMAControllBlock
+{
     uint32_t transferInfo;
     uint32_t srcAddress;
     uint32_t dstAddress;
@@ -102,7 +106,8 @@ struct DMAControllBlock {
     uint32_t reserved1;
 };
 
-struct DMARegisters {
+struct DMARegisters
+{
     uint32_t ctlStatus;
     uint32_t cbAddress;
     uint32_t transferInfo;
@@ -116,200 +121,239 @@ struct DMARegisters {
 
 class Peripherals
 {
-    public:
-        virtual ~Peripherals() {
-            munmap(peripherals, GetSize());
-        }
-        Peripherals(const Peripherals &) = delete;
-        Peripherals(Peripherals &&) = delete;
-        Peripherals &operator=(const Peripherals &) = delete;
-        static Peripherals &GetInstance() {
-            static Peripherals instance;
-            return instance;
-        }
-        inline uint32_t GetPhysicalAddress(volatile void *object) const {
-            return PERIPHERALS_PHYS_BASE + (reinterpret_cast<uint32_t>(object) - reinterpret_cast<uint32_t>(peripherals));
-        }
-        inline uint32_t GetVirtualAddress(uint32_t offset) const {
-            return reinterpret_cast<uint32_t>(peripherals) + offset;
-        }
-        inline static uint32_t GetVirtualBaseAddress() {
-            return (bcm_host_get_peripheral_size() == BCM2838_PERI_VIRT_BASE) ? BCM2838_PERI_VIRT_BASE : bcm_host_get_peripheral_address();
-        }
-        inline static float GetClockFrequency() {
-            return (Peripherals::GetVirtualBaseAddress() == BCM2838_PERI_VIRT_BASE) ? BCM2838_PLLD_FREQ : BCM2835_PLLD_FREQ;
-        }
-    private:
-        Peripherals() {
-            int memFd;
-            if ((memFd = open("/dev/mem", O_RDWR | O_SYNC)) < 0) {
-                throw std::runtime_error("Cannot open /dev/mem file (permission denied)");
-            }
+public:
+    virtual ~Peripherals()
+    {
+        munmap(peripherals, GetSize());
+    }
+    Peripherals(const Peripherals &) = delete;
+    Peripherals(Peripherals &&) = delete;
+    Peripherals &operator=(const Peripherals &) = delete;
+    static Peripherals &GetInstance()
+    {
+        static Peripherals instance;
+        return instance;
+    }
+    inline uint32_t GetPhysicalAddress(volatile void *object) const
+    {
+        return PERIPHERALS_PHYS_BASE + (reinterpret_cast<uintptr_t>(object) - reinterpret_cast<uintptr_t>(peripherals));
+    }
+    inline uint32_t GetVirtualAddress(uint32_t offset) const
+    {
+        return reinterpret_cast<uintptr_t>(peripherals) + offset;
+    }
+    inline static uint32_t GetVirtualBaseAddress()
+    {
+        return (bcm_host_get_peripheral_size() == BCM2838_PERI_VIRT_BASE) ? BCM2838_PERI_VIRT_BASE : bcm_host_get_peripheral_address();
+    }
+    inline static float GetClockFrequency()
+    {
+        return (Peripherals::GetVirtualBaseAddress() == BCM2838_PERI_VIRT_BASE) ? BCM2838_PLLD_FREQ : BCM2835_PLLD_FREQ;
+    }
 
-            peripherals = mmap(nullptr, GetSize(), PROT_READ | PROT_WRITE, MAP_SHARED, memFd, GetVirtualBaseAddress());
-            close(memFd);
-            if (peripherals == MAP_FAILED) {
-                throw std::runtime_error("Cannot obtain access to peripherals (mmap error)");
-            }
-        }
-        unsigned GetSize() {
-            unsigned size = bcm_host_get_peripheral_size();
-            if (size == BCM2838_PERI_VIRT_BASE) {
-                size = 0x01000000;
-            }
-            return size;
+private:
+    Peripherals()
+    {
+        int memFd;
+        if ((memFd = open("/dev/mem", O_RDWR | O_SYNC)) < 0)
+        {
+            throw std::runtime_error("Cannot open /dev/mem file (permission denied)");
         }
 
-        void *peripherals;
+        peripherals = mmap(nullptr, GetSize(), PROT_READ | PROT_WRITE, MAP_SHARED, memFd, GetVirtualBaseAddress());
+        close(memFd);
+        if (peripherals == MAP_FAILED)
+        {
+            throw std::runtime_error("Cannot obtain access to peripherals (mmap error)");
+        }
+    }
+    unsigned GetSize()
+    {
+        unsigned size = bcm_host_get_peripheral_size();
+        if (size == BCM2838_PERI_VIRT_BASE)
+        {
+            size = 0x01000000;
+        }
+        return size;
+    }
+
+    void *peripherals;
 };
 
 class AllocatedMemory
 {
-    public:
-        AllocatedMemory(unsigned size) {
-            mBoxFd = mbox_open();
-            memSize = size;
-            if (memSize % PAGE_SIZE) {
-                memSize = (memSize / PAGE_SIZE + 1) * PAGE_SIZE;
-            }
-            memHandle = mem_alloc(mBoxFd, size, PAGE_SIZE, (Peripherals::GetVirtualBaseAddress() == BCM2835_PERI_VIRT_BASE) ? BCM2835_MEM_FLAG : BCM2838_MEM_FLAG);
-            if (!memHandle) {
-                mbox_close(mBoxFd);
-                memSize = 0;
-                throw std::runtime_error("Cannot allocate memory (" + std::to_string(size) + "bytes");
-            }
-            memAddress = mem_lock(mBoxFd, memHandle);
-            memAllocated = mapmem(memAddress & ~0xc0000000, memSize);
+public:
+    AllocatedMemory(unsigned size)
+    {
+        mBoxFd = mbox_open();
+        memSize = size;
+        if (memSize % PAGE_SIZE)
+        {
+            memSize = (memSize / PAGE_SIZE + 1) * PAGE_SIZE;
         }
-        virtual ~AllocatedMemory() {
-            unmapmem(memAllocated, memSize);
-            mem_unlock(mBoxFd, memHandle);
-            mem_free(mBoxFd, memHandle);
+        memHandle = mem_alloc(mBoxFd, size, PAGE_SIZE, (Peripherals::GetVirtualBaseAddress() == BCM2835_PERI_VIRT_BASE) ? BCM2835_MEM_FLAG : BCM2838_MEM_FLAG);
+        if (!memHandle)
+        {
             mbox_close(mBoxFd);
             memSize = 0;
+            throw std::runtime_error("Cannot allocate memory (" + std::to_string(size) + "bytes");
         }
-        AllocatedMemory(const AllocatedMemory &) = delete;
-        AllocatedMemory(AllocatedMemory &&) = delete;
-        AllocatedMemory &operator=(const AllocatedMemory &) = delete;
-        inline uint32_t GetPhysicalAddress(volatile void *object) const {
-            return (memSize) ? memAddress + (reinterpret_cast<uint32_t>(object) - reinterpret_cast<uint32_t>(memAllocated)) : 0x00000000;
-        }
-        inline uint32_t GetAddress() const {
-            return reinterpret_cast<uint32_t>(memAllocated);
-        }
-    private:
-        unsigned memSize, memHandle;
-        uint32_t memAddress;
-        void *memAllocated;
-        int mBoxFd;
+        memAddress = mem_lock(mBoxFd, memHandle);
+        memAllocated = mapmem(memAddress & ~0xc0000000, memSize);
+    }
+    virtual ~AllocatedMemory()
+    {
+        unmapmem(memAllocated, memSize);
+        mem_unlock(mBoxFd, memHandle);
+        mem_free(mBoxFd, memHandle);
+        mbox_close(mBoxFd);
+        memSize = 0;
+    }
+    AllocatedMemory(const AllocatedMemory &) = delete;
+    AllocatedMemory(AllocatedMemory &&) = delete;
+    AllocatedMemory &operator=(const AllocatedMemory &) = delete;
+    inline uint32_t GetPhysicalAddress(volatile void *object) const
+    {
+        return (memSize) ? memAddress + (reinterpret_cast<uintptr_t>(object) - reinterpret_cast<uintptr_t>(memAllocated)) : 0x00000000;
+    }
+    inline uint32_t GetAddress() const
+    {
+        return reinterpret_cast<uintptr_t>(memAllocated);
+    }
+
+private:
+    unsigned memSize, memHandle;
+    uint32_t memAddress;
+    void *memAllocated;
+    int mBoxFd;
 };
 
 class Device
 {
-    public:
-        Device() {
-            peripherals = &Peripherals::GetInstance();
-        }
-        Device(const Device &) = delete;
-        Device(Device &&) = delete;
-        Device &operator=(const Device &) = delete;
-    protected:
-        Peripherals *peripherals;
+public:
+    Device()
+    {
+        peripherals = &Peripherals::GetInstance();
+    }
+    Device(const Device &) = delete;
+    Device(Device &&) = delete;
+    Device &operator=(const Device &) = delete;
+
+protected:
+    Peripherals *peripherals;
 };
 
 class ClockDevice : public Device
 {
-    public:
-        ClockDevice(uint32_t clockAddress, unsigned divisor) {
-            clock = reinterpret_cast<ClockRegisters *>(peripherals->GetVirtualAddress(clockAddress));
-            clock->ctl = (0x5a << 24) | 0x06;
-            std::this_thread::sleep_for(std::chrono::microseconds(1000));
-            clock->div = (0x5a << 24) | (0xffffff & divisor);
-            clock->ctl = (0x5a << 24) | (0x01 << 9) | (0x01 << 4) | 0x06;
-        }
-        virtual ~ClockDevice() {
-            clock->ctl = (0x5a << 24) | 0x06;
-        }
-    protected:
-        volatile ClockRegisters *clock;
+public:
+    ClockDevice(uint32_t clockAddress, unsigned divisor)
+    {
+        clock = reinterpret_cast<ClockRegisters *>(peripherals->GetVirtualAddress(clockAddress));
+        clock->ctl = (0x5a << 24) | 0x06;
+        std::this_thread::sleep_for(std::chrono::microseconds(1000));
+        clock->div = (0x5a << 24) | (0xffffff & divisor);
+        clock->ctl = (0x5a << 24) | (0x01 << 9) | (0x01 << 4) | 0x06;
+    }
+    virtual ~ClockDevice()
+    {
+        clock->ctl = (0x5a << 24) | 0x06;
+    }
+
+protected:
+    volatile ClockRegisters *clock;
 };
 
 class ClockOutput : public ClockDevice
 {
-    public:
+public:
 #ifndef GPIO21
-        ClockOutput(unsigned divisor) : ClockDevice(CLK0_BASE_OFFSET, divisor) {
-            output = reinterpret_cast<uint32_t *>(peripherals->GetVirtualAddress(GPIO_BASE_OFFSET));
-            *output = (*output & 0xffff8fff) | (0x04 << 12);
+    ClockOutput(unsigned divisor) : ClockDevice(CLK0_BASE_OFFSET, divisor)
+    {
+        output = reinterpret_cast<uint32_t *>(peripherals->GetVirtualAddress(GPIO_BASE_OFFSET));
+        *output = (*output & 0xffff8fff) | (0x04 << 12);
 #else
-        ClockOutput(unsigned divisor) : ClockDevice(CLK1_BASE_OFFSET, divisor) {
-            output = reinterpret_cast<uint32_t *>(peripherals->GetVirtualAddress(GPIO_BASE_OFFSET + 0x08));
-            *output = (*output & 0xffffffc7) | (0x02 << 3);
+    ClockOutput(unsigned divisor) : ClockDevice(CLK1_BASE_OFFSET, divisor)
+    {
+        output = reinterpret_cast<uint32_t *>(peripherals->GetVirtualAddress(GPIO_BASE_OFFSET + 0x08));
+        *output = (*output & 0xffffffc7) | (0x02 << 3);
 #endif
-        }
-        virtual ~ClockOutput() {
+    }
+    virtual ~ClockOutput()
+    {
 #ifndef GPIO21
-            *output = (*output & 0xffff8fff) | (0x01 << 12);
+        *output = (*output & 0xffff8fff) | (0x01 << 12);
 #else
-            *output = (*output & 0xffffffc7) | (0x02 << 3);
+        *output = (*output & 0xffffffc7) | (0x02 << 3);
 #endif
-        }
-        inline void SetDivisor(unsigned divisor) {
-            clock->div = (0x5a << 24) | (0xffffff & divisor);
-        }
-        inline volatile uint32_t &GetDivisor() {
-            return clock->div;
-        }
-    private:
-        volatile uint32_t *output;
+    }
+    inline void SetDivisor(unsigned divisor)
+    {
+        clock->div = (0x5a << 24) | (0xffffff & divisor);
+    }
+    inline volatile uint32_t &GetDivisor()
+    {
+        return clock->div;
+    }
+
+private:
+    volatile uint32_t *output;
 };
 
 class PWMController : public ClockDevice
 {
-    public:
-        PWMController(unsigned sampleRate) : ClockDevice(PWMCLK_BASE_OFFSET, static_cast<unsigned>(Peripherals::GetClockFrequency() * 1000000.f * (0x01 << 12) / (PWM_WRITES_PER_SAMPLE * PWM_CHANNEL_RANGE * sampleRate))) {
-            pwm = reinterpret_cast<PWMRegisters *>(peripherals->GetVirtualAddress(PWM_BASE_OFFSET));
-            pwm->ctl = 0x00000000;
-            std::this_thread::sleep_for(std::chrono::microseconds(1000));
-            pwm->status = 0x01fc;
-            pwm->ctl = (0x01 << 6);
-            std::this_thread::sleep_for(std::chrono::microseconds(1000));
-            pwm->chn1Range = PWM_CHANNEL_RANGE;
-            pwm->dmaConf = (0x01 << 31) | 0x0707;
-            pwm->ctl = (0x01 << 5) | (0x01 << 2) | 0x01;
-        }
-        virtual ~PWMController() {
-            pwm->ctl = 0x00000000;
-        }
-        inline volatile uint32_t &GetFifoIn() {
-            return pwm->fifoIn;
-        }
-    private:
-        volatile PWMRegisters *pwm;
+public:
+    PWMController(unsigned sampleRate) : ClockDevice(PWMCLK_BASE_OFFSET, static_cast<unsigned>(Peripherals::GetClockFrequency() * 1000000.f * (0x01 << 12) / (PWM_WRITES_PER_SAMPLE * PWM_CHANNEL_RANGE * sampleRate)))
+    {
+        pwm = reinterpret_cast<PWMRegisters *>(peripherals->GetVirtualAddress(PWM_BASE_OFFSET));
+        pwm->ctl = 0x00000000;
+        std::this_thread::sleep_for(std::chrono::microseconds(1000));
+        pwm->status = 0x01fc;
+        pwm->ctl = (0x01 << 6);
+        std::this_thread::sleep_for(std::chrono::microseconds(1000));
+        pwm->chn1Range = PWM_CHANNEL_RANGE;
+        pwm->dmaConf = (0x01 << 31) | 0x0707;
+        pwm->ctl = (0x01 << 5) | (0x01 << 2) | 0x01;
+    }
+    virtual ~PWMController()
+    {
+        pwm->ctl = 0x00000000;
+    }
+    inline volatile uint32_t &GetFifoIn()
+    {
+        return pwm->fifoIn;
+    }
+
+private:
+    volatile PWMRegisters *pwm;
 };
 
 class DMAController : public Device
 {
-    public:
-        DMAController(uint32_t controllBlockAddress, unsigned dmaChannel) {
-            dma = reinterpret_cast<DMARegisters *>(peripherals->GetVirtualAddress((dmaChannel < 15) ? DMA0_BASE_OFFSET + dmaChannel * 0x100 : DMA15_BASE_OFFSET));
-            dma->ctlStatus = (0x01 << 31);
-            std::this_thread::sleep_for(std::chrono::microseconds(1000));
-            dma->ctlStatus = (0x01 << 2) | (0x01 << 1);
-            dma->cbAddress = controllBlockAddress;
-            dma->ctlStatus = (0xff << 16) | 0x01;
-        }
-        virtual ~DMAController() {
-            dma->ctlStatus = (0x01 << 31);
-        }
-        inline void SetControllBlockAddress(uint32_t address) {
-            dma->cbAddress = address;
-        }
-        inline volatile uint32_t &GetControllBlockAddress() {
-            return dma->cbAddress;
-        }
-    private:
-        volatile DMARegisters *dma;
+public:
+    DMAController(uint32_t controllBlockAddress, unsigned dmaChannel)
+    {
+        dma = reinterpret_cast<DMARegisters *>(peripherals->GetVirtualAddress((dmaChannel < 15) ? DMA0_BASE_OFFSET + dmaChannel * 0x100 : DMA15_BASE_OFFSET));
+        dma->ctlStatus = (0x01 << 31);
+        std::this_thread::sleep_for(std::chrono::microseconds(1000));
+        dma->ctlStatus = (0x01 << 2) | (0x01 << 1);
+        dma->cbAddress = controllBlockAddress;
+        dma->ctlStatus = (0xff << 16) | 0x01;
+    }
+    virtual ~DMAController()
+    {
+        dma->ctlStatus = (0x01 << 31);
+    }
+    inline void SetControllBlockAddress(uint32_t address)
+    {
+        dma->cbAddress = address;
+    }
+    inline volatile uint32_t &GetControllBlockAddress()
+    {
+        return dma->cbAddress;
+    }
+
+private:
+    volatile DMARegisters *dma;
 };
 
 bool Transmitter::transmitting = false;
@@ -319,15 +363,18 @@ Transmitter::Transmitter()
 {
 }
 
-Transmitter::~Transmitter() {
-    if (output != nullptr) {
+Transmitter::~Transmitter()
+{
+    if (output != nullptr)
+    {
         delete output;
     }
 }
 
 void Transmitter::Transmit(WaveReader &reader, float frequency, float bandwidth, unsigned dmaChannel, bool preserveCarrier)
 {
-    if (transmitting) {
+    if (transmitting)
+    {
         throw std::runtime_error("Cannot transmit, transmitter already in use");
     }
     transmitting = true;
@@ -339,24 +386,33 @@ void Transmitter::Transmit(WaveReader &reader, float frequency, float bandwidth,
     unsigned clockDivisor = static_cast<unsigned>(round(Peripherals::GetClockFrequency() * (0x01 << 12) / frequency));
     unsigned divisorRange = clockDivisor - static_cast<unsigned>(round(Peripherals::GetClockFrequency() * (0x01 << 12) / (frequency + 0.0005f * bandwidth)));
 
-    if (output == nullptr) {
+    if (output == nullptr)
+    {
         output = new ClockOutput(clockDivisor);
     }
 
-    auto finally = [&]() {
-        if (!preserveCarrier) {
+    auto finally = [&]()
+    {
+        if (!preserveCarrier)
+        {
             delete output;
             output = nullptr;
         }
         transmitting = false;
     };
-    try {
-        if (dmaChannel != 0xff) {
+    try
+    {
+        if (dmaChannel != 0xff)
+        {
             TransmitViaDma(reader, *output, header.sampleRate, bufferSize, clockDivisor, divisorRange, dmaChannel);
-        } else {
+        }
+        else
+        {
             TransmitViaCpu(reader, *output, header.sampleRate, bufferSize, clockDivisor, divisorRange);
         }
-    } catch (...) {
+    }
+    catch (...)
+    {
         finally();
         throw;
     }
@@ -371,7 +427,8 @@ void Transmitter::Stop()
 void Transmitter::TransmitViaCpu(WaveReader &reader, ClockOutput &output, unsigned sampleRate, unsigned bufferSize, unsigned clockDivisor, unsigned divisorRange)
 {
     std::vector<Sample> samples = reader.GetSamples(bufferSize, stopped);
-    if (samples.empty()) {
+    if (samples.empty())
+    {
         return;
     }
 
@@ -381,21 +438,27 @@ void Transmitter::TransmitViaCpu(WaveReader &reader, ClockOutput &output, unsign
 
     std::this_thread::sleep_for(std::chrono::microseconds(BUFFER_TIME / 2));
 
-    auto finally = [&]() {
-		stopped = true;
+    auto finally = [&]()
+    {
+        stopped = true;
         transmitterThread.join();
         samples.clear();
     };
-    try {
-        while (!eof && !stopped) {
+    try
+    {
+        while (!eof && !stopped)
+        {
             {
                 std::lock_guard<std::mutex> lock(access);
-                if (samples.empty()) {
-                    if (!reader.SetSampleOffset(sampleOffset + bufferSize)) {
+                if (samples.empty())
+                {
+                    if (!reader.SetSampleOffset(sampleOffset + bufferSize))
+                    {
                         break;
                     }
                     samples = reader.GetSamples(bufferSize, stopped);
-                    if (samples.empty()) {
+                    if (samples.empty())
+                    {
                         break;
                     }
                     eof = samples.size() < bufferSize;
@@ -403,7 +466,9 @@ void Transmitter::TransmitViaCpu(WaveReader &reader, ClockOutput &output, unsign
             }
             std::this_thread::sleep_for(std::chrono::microseconds(BUFFER_TIME / 2));
         }
-    } catch (...) {
+    }
+    catch (...)
+    {
         finally();
         throw;
     }
@@ -412,19 +477,22 @@ void Transmitter::TransmitViaCpu(WaveReader &reader, ClockOutput &output, unsign
 
 void Transmitter::TransmitViaDma(WaveReader &reader, ClockOutput &output, unsigned sampleRate, unsigned bufferSize, unsigned clockDivisor, unsigned divisorRange, unsigned dmaChannel)
 {
-    if (dmaChannel > 15) {
+    if (dmaChannel > 15)
+    {
         throw std::runtime_error("DMA channel number out of range (0 - 15)");
     }
 
     AllocatedMemory allocated(sizeof(uint32_t) * (bufferSize) + sizeof(DMAControllBlock) * (2 * bufferSize) + sizeof(uint32_t));
 
     std::vector<Sample> samples = reader.GetSamples(bufferSize, stopped);
-    if (samples.empty()) {
+    if (samples.empty())
+    {
         return;
     }
 
     bool eof = false;
-    if (samples.size() < bufferSize) {
+    if (samples.size() < bufferSize)
+    {
         bufferSize = samples.size();
         eof = true;
     }
@@ -435,9 +503,10 @@ void Transmitter::TransmitViaDma(WaveReader &reader, ClockOutput &output, unsign
     unsigned i, cbOffset = 0;
 
     volatile DMAControllBlock *dmaCb = reinterpret_cast<DMAControllBlock *>(allocated.GetAddress());
-    volatile uint32_t *clkDiv = reinterpret_cast<uint32_t *>(reinterpret_cast<uint32_t>(dmaCb) + 2 * sizeof(DMAControllBlock) * bufferSize);
-    volatile uint32_t *pwmFifoData = reinterpret_cast<uint32_t *>(reinterpret_cast<uint32_t>(clkDiv) + sizeof(uint32_t) * bufferSize);
-    for (i = 0; i < bufferSize; i++) {
+    volatile uint32_t *clkDiv = reinterpret_cast<uint32_t *>(reinterpret_cast<uintptr_t>(dmaCb) + 2 * sizeof(DMAControllBlock) * bufferSize);
+    volatile uint32_t *pwmFifoData = reinterpret_cast<uint32_t *>(reinterpret_cast<uintptr_t>(clkDiv) + sizeof(uint32_t) * bufferSize);
+    for (i = 0; i < bufferSize; i++)
+    {
         float value = samples[i].GetMonoValue();
         clkDiv[i] = (0x5a << 24) | (0xffffff & (clockDivisor - static_cast<int>(round(value * divisorRange))));
         dmaCb[cbOffset].transferInfo = (0x01 << 26) | (0x01 << 3);
@@ -462,32 +531,41 @@ void Transmitter::TransmitViaDma(WaveReader &reader, ClockOutput &output, unsign
 
     std::this_thread::sleep_for(std::chrono::microseconds(BUFFER_TIME / 4));
 
-    auto finally = [&]() {
+    auto finally = [&]()
+    {
         dmaCb[(cbOffset < 2 * bufferSize) ? cbOffset : 0].nextCbAddress = 0x00000000;
-        while (dma.GetControllBlockAddress() != 0x00000000) {
+        while (dma.GetControllBlockAddress() != 0x00000000)
+        {
             std::this_thread::sleep_for(std::chrono::microseconds(1000));
         }
         stopped = true;
         samples.clear();
     };
-    try {
-        while (!eof && !stopped) {
+    try
+    {
+        while (!eof && !stopped)
+        {
             samples = reader.GetSamples(bufferSize, stopped);
-            if (!samples.size()) {
+            if (!samples.size())
+            {
                 break;
             }
             cbOffset = 0;
             eof = samples.size() < bufferSize;
-            for (i = 0; i < samples.size(); i++) {
+            for (i = 0; i < samples.size(); i++)
+            {
                 float value = samples[i].GetMonoValue();
-                while (i == ((dma.GetControllBlockAddress() - allocated.GetPhysicalAddress(dmaCb)) / (2 * sizeof(DMAControllBlock)))) {
+                while (i == ((dma.GetControllBlockAddress() - allocated.GetPhysicalAddress(dmaCb)) / (2 * sizeof(DMAControllBlock))))
+                {
                     std::this_thread::sleep_for(std::chrono::microseconds(1000));
                 }
                 clkDiv[i] = (0x5a << 24) | (0xffffff & (clockDivisor - static_cast<int>(round(value * divisorRange))));
                 cbOffset += 2;
             }
         }
-    } catch (...) {
+    }
+    catch (...)
+    {
         finally();
         throw;
     }
@@ -502,17 +580,21 @@ void Transmitter::TransmitterThread(Transmitter *instance, ClockOutput *output, 
     uint64_t current = *(reinterpret_cast<volatile uint64_t *>(&timer->low));
     uint64_t playbackStart = current;
 
-    while (true) {
+    while (true)
+    {
         std::vector<Sample> loadedSamples;
-        while (true) {
+        while (true)
+        {
             {
                 std::lock_guard<std::mutex> lock(instance->access);
-                if (instance->stopped) {
+                if (instance->stopped)
+                {
                     return;
                 }
                 loadedSamples = std::move(*samples);
                 current = *(reinterpret_cast<volatile uint64_t *>(&timer->low));
-                if (!loadedSamples.empty()) {
+                if (!loadedSamples.empty())
+                {
                     *sampleOffset = (current - playbackStart) * sampleRate / 1000000;
                     break;
                 }
@@ -523,16 +605,20 @@ void Transmitter::TransmitterThread(Transmitter *instance, ClockOutput *output, 
         uint64_t start = current;
         unsigned offset = (current - start) * sampleRate / 1000000;
 
-        while (true) {
-            if (offset >= loadedSamples.size()) {
+        while (true)
+        {
+            if (offset >= loadedSamples.size())
+            {
                 break;
             }
             unsigned prevOffset = offset;
             float value = loadedSamples[offset].GetMonoValue();
             instance->output->SetDivisor(clockDivisor - static_cast<int>(round(value * divisorRange)));
-            while (offset == prevOffset) {
+            while (offset == prevOffset)
+            {
                 std::this_thread::sleep_for(std::chrono::microseconds(1)); // asm("nop");
-                current = *(reinterpret_cast<volatile uint64_t *>(&timer->low));;
+                current = *(reinterpret_cast<volatile uint64_t *>(&timer->low));
+                ;
                 offset = (current - start) * sampleRate / 1000000;
             }
         }
