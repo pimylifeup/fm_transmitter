@@ -43,7 +43,7 @@
 Sample::Sample(uint8_t *data, unsigned channels, unsigned bitsPerChannel)
     : value(0.f)
 {
-    uint32_t sum = 0;
+    int32_t sum = 0;
     for (unsigned i = 0; i < channels; i++) {
         switch (bitsPerChannel >> 3) {
         case 2:
