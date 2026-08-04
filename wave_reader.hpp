@@ -1,7 +1,7 @@
 /*
     FM Transmitter - use Raspberry Pi as FM transmitter
 
-    Copyright (c) 2020, Marcin Kondej
+    Copyright (c) 2021, Marcin Kondej
     All rights reserved.
 
     See https://github.com/markondej/fm_transmitter
@@ -31,12 +31,12 @@
     WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef WAVE_READER_HPP
-#define WAVE_READER_HPP
+#pragma once
 
-#include "sample.hpp"
+#include <cstdint>
 #include <string>
 #include <vector>
+#include <mutex>
 
 #define WAVE_FORMAT_PCM 0x0001
 
@@ -57,25 +57,32 @@ struct WaveHeader
     uint32_t subchunk2Size;
 };
 
+class Sample
+{
+public:
+    Sample(uint8_t *data, unsigned channels, unsigned bitsPerChannel);
+    float GetMonoValue() const;
+protected:
+    float value;
+};
+
 class WaveReader
 {
     public:
-        WaveReader(const std::string &filename, bool &stop);
+        WaveReader(const std::string &filename, bool &enable, std::mutex &mtx);
         virtual ~WaveReader();
         WaveReader(const WaveReader &) = delete;
         WaveReader(WaveReader &&) = delete;
         WaveReader &operator=(const WaveReader &) = delete;
         std::string GetFilename() const;
         const WaveHeader &GetHeader() const;
-        std::vector<Sample> GetSamples(unsigned quantity, bool &stop);
+        std::vector<Sample> GetSamples(unsigned quantity, bool &enable, std::mutex &mtx);
         bool SetSampleOffset(unsigned offset);
     private:
-        std::vector<uint8_t> ReadData(unsigned bytesToRead, bool headerBytes, bool &stop);
+        std::vector<uint8_t> ReadData(unsigned bytesToRead, bool headerBytes, bool &enable, std::mutex &mtx);
 
         std::string filename;
         WaveHeader header;
         unsigned dataOffset, headerOffset, currentDataOffset;
-        int fileDescriptor;
+        int fd;
 };
-
-#endif // WAVE_READER_HPP

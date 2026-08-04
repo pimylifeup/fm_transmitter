@@ -1,7 +1,7 @@
 /*
     FM Transmitter - use Raspberry Pi as FM transmitter
 
-    Copyright (c) 2020, Marcin Kondej
+    Copyright (c) 2021, Marcin Kondej
     All rights reserved.
 
     See https://github.com/markondej/fm_transmitter
@@ -32,20 +32,21 @@
 */
 
 #include "transmitter.hpp"
-#include <cstdlib>
-#include <csignal>
 #include <iostream>
+#include <csignal>
 #include <unistd.h>
 
-bool stop = false;
+std::mutex mtx;
+bool enable = true;
 Transmitter *transmitter = nullptr;
 
 void sigIntHandler(int sigNum)
 {
-    if (transmitter != nullptr) {
+    if (transmitter) {
         std::cout << "Stopping..." << std::endl;
         transmitter->Stop();
-        stop = true;
+	std::unique_lock<std::mutex> lock(mtx);
+        enable = false;
     }
 }
 
@@ -62,16 +63,16 @@ int main(int argc, char** argv)
                 loop = true;
                 break;
             case 'f':
-                frequency = ::atof(optarg);
+                frequency = std::stof(optarg);
                 break;
             case 'd':
-                dmaChannel = ::atof(optarg);
+                dmaChannel = std::stoi(optarg);
                 break;
             case 'b':
-                bandwidth = ::atof(optarg);
+                bandwidth = std::stof(optarg);
                 break;
             case 'v':
-                std::cout << EXECUTABLE << " version: " << VERSION << std::endl;
+                std::cout << argv[0] << " version: " << VERSION << std::endl;
                 return 0;
         }
     }
@@ -80,17 +81,15 @@ int main(int argc, char** argv)
         showUsage = false;
     }
     if (showUsage) {
-        std::cout << "Usage: " << EXECUTABLE << " [-f <frequency>] [-b <bandwidth>] [-d <dma_channel>] [-r] <file>" << std::endl;
+        std::cout << "Usage: " << argv[0] << " [-f <frequency>] [-b <bandwidth>] [-d <dma_channel>] [-r] <file>" << std::endl;
         return 0;
     }
 
-    signal(SIGINT, sigIntHandler);
-    signal(SIGTSTP, sigIntHandler);
+    int result = EXIT_SUCCESS;
 
-    auto finally = [&]() {
-        delete transmitter;
-        transmitter = nullptr;
-    };
+    std::signal(SIGINT, sigIntHandler);
+    std::signal(SIGTERM, sigIntHandler);
+
     try {
         transmitter = new Transmitter();
         std::cout << "Broadcasting at " << frequency << " MHz with "
@@ -100,20 +99,23 @@ int main(int argc, char** argv)
             if ((optind == argc) && loop) {
                 optind = filesOffset;
             }
-            WaveReader reader(filename != "-" ? filename : std::string(), stop);
+            WaveReader reader(filename != "-" ? filename : std::string(), enable, mtx);
             WaveHeader header = reader.GetHeader();
             std::cout << "Playing: " << reader.GetFilename() << ", "
                 << header.sampleRate << " Hz, "
                 << header.bitsPerSample << " bits, "
                 << ((header.channels > 0x01) ? "stereo" : "mono") << std::endl;
             transmitter->Transmit(reader, frequency, bandwidth, dmaChannel, optind < argc);
-        } while (!stop && (optind < argc));
+        } while (enable && (optind < argc));
     } catch (std::exception &catched) {
-        std::cout << "Error: " << catched.what() << std::endl;
-        finally();
-        return 1;
+        std::cerr << "Error: " << catched.what() << std::endl;
+        result = EXIT_FAILURE;
     }
-    finally();
+    if (transmitter) {
+        auto temp = transmitter;
+        transmitter = nullptr;
+        delete temp;
+    }
 
-    return 0;
+    return result;
 }
